@@ -71,10 +71,10 @@ paths:
           content:
             application/json:
               schema:
-                # Düz liste: people.json'un ve getAllPeople(): Person[] çıktısının biçimi
+                # Düz liste: people.json'un biçimi (PersonData[])
                 type: array
                 items:
-                  $ref: "#/components/schemas/Person"
+                  $ref: "#/components/schemas/PersonData"
         "500":
           description: Unexpected server error.
 
@@ -83,8 +83,10 @@ paths:
       operationId: getPerson
       summary: Tek kişi
       description: >
-        All data the person page (/kisiler/[slug]) needs:
-        biography, photo, links and clips.
+        Data of one person for the person page (/kisiler/[slug]):
+        biography, photo, links and clip notes (topic, quote).
+        The clips themselves (title, date, source) come from /clips;
+        the site joins them with the clip notes by the reel code.
       parameters:
         - $ref: "#/components/parameters/Slug"
         # dosyadaki yolu
@@ -94,7 +96,8 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Person"
+                # people.json'daki tek bir kişinin biçimi
+                $ref: "#/components/schemas/PersonData"
         "400":
           description: Invalid slug (contains characters that are not allowed).
         "404":
@@ -291,12 +294,57 @@ components:
     #     topic: string; // konu: editör kararı
     #     quote?: string; // klipten alıntı, kişinin kendi sözü. ? = her klipte yok
     # };
-    # → Sözleşmede şeması yok: people.json'un iç biçimi, API cevabı değil.
+    ClipNote:
+      type: object
+      additionalProperties: false
+      required: [reel, topic]
+      properties:
+        reel:
+          type: string
+          description: Instagram code. Same as FeedClip.reel in /clips; the site joins the note with the clip by this code.
+          example: Ddqm-BsAxNj
+        topic:
+          type: string
+          description: Topic chosen by the editor.
+          example: girişimcilik
+        quote:
+          type: string
+          description: Quote from the clip, the person's own words.
 
     # // people.json'daki bir kişinin hâli: clips yerine clipNotes (klip notları)
     # // Omit<Person, "clips"> = Person'ın "clips" dışındaki bütün alanları
     # export type PersonData = Omit<Person, "clips"> & { clipNotes: ClipNote[] };
-    # → Sözleşmede şeması yok: API'nin Person mı PersonData mı döneceği toplantıda netleşecek.
+    # /people ve /people/{slug} bunu döner (people.json biçimi). Klipleri site birleştirir.
+    PersonData:
+      type: object
+      additionalProperties: false
+      required: [slug, name, bio, dek, links, clipNotes, updatedAt, editor]
+      properties:
+        slug:
+          type: string
+          example: nevzat-aydin
+        name:
+          type: string
+        bio:
+          type: string
+        dek:
+          type: string
+          description: One-sentence introduction shown under the title.
+        photo:
+          $ref: "#/components/schemas/Photo"
+        links:
+          type: array
+          items:
+            type: string
+        clipNotes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClipNote"
+        updatedAt:
+          type: string
+          example: "2026-11-14"
+        editor:
+          type: string
 
     # // Fotoğrafın kimlik kartı (Wikipedia/Commons'tan)
     # export type Photo = {
