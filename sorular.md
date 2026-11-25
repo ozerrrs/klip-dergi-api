@@ -1,4 +1,4 @@
-## Açık sorular
+## Sorular API sözleşmesi
 
 ### 1. Boş parametre: `?topic=` ve `?search=`
 
@@ -81,6 +81,9 @@ Ana sayfadaki vitrin, listedeki **ilk 5 kişiyi** gösteriyor. Bugün sıra `peo
 - **A)** `people.json`'daki sıra korunsun (veritabanında bir sıra alanı tutulur, editör sırayı belirler)
 - **B)** İsme göre (A → Z)
 - **C)** `updatedAt`'e göre (en son güncellenen önce)
+
+> **Şimdilik:** Tablolarda sıra sütunu yok. Sorgular `orderBy(name)` ile isme göre sıralanacak; böylece sıra her seferinde aynı olur ama `people.json`'daki gibi olmaz (vitrin ve konu düğmelerinin sırası değişir).
+> **Cevap A olursa:** `people` ve `clip_people` tablolarına `position` sütunu eklenir (yeni migration), seed yeniden çalıştırılır ve sorgular `orderBy(position)` olur.
 
 ### 8. Görseller nerede duracak?
 
