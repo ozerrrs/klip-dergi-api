@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: klip-dergi-postgres
+    restart: unless-stopped
+    # Kullanıcı adı ve şifre koda yazılmaz; .env dosyasından okunur (CLAUDE.md: gizli bilgi .env'de durur)
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # $$ = değişkeni container'ın içinde oku (Compose'un kendisi değiştirmesin)
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

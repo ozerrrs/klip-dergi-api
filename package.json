@@ -1,0 +1,18 @@
+{
+  "scripts": {
+    "db:seed": "tsx scripts/seed.ts",
+    "db:test-idempotency": "tsx scripts/test-idempotency.ts"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.10",
+    "drizzle-orm": "^0.45.4",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.10",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,514 @@
+# Bu dosyayı kontrol etmek (lint) için terminalde, proje klasöründe çalıştır:
+#   npx @redocly/cli lint openapi.yaml
+# OpenAPI kurallarına uyuyor mu, kırık $ref var mı diye bakar.
+# Beklenen sonuç: "Woohoo! Your API description is valid. 🎉" (0 hata).
+# Kalan uyarılar bilinçli: 4xx yok (bu uçlar kullanıcı hatasıyla başarısız olamıyor),
+# lisans yok, sunucu adresi sadece localhost.
+
+openapi: 3.1.0
+info:
+  title: Klip Dergi API
+  version: 0.1.0
+
+# API'nin çalışacağı adres. Site 3000'de çalıştığı için API 3001'de (aynı port iki programa verilemez).
+servers:
+  - url: http://localhost:3001
+    description: Local development
+
+# Herkese açık: API sadece okuma yapıyor ve sitedeki bilgiler zaten herkese açık.
+# Boş liste = "kimlik sorulmaz" (unutulmadı, bilerek böyle).
+security: []
+
+# export default async function KisiSayfasi({ params }) {
+#   const { slug } = await params;
+#   const kisi = await getPersonBySlug(slug);
+#   if (!kisi) {
+#     notFound();
+#   }
+
+paths:
+  /people:
+    get:
+      operationId: listPeople
+      summary: Bütün kişiler
+      description: >
+        List used by the People page (/kisiler) and the home page.
+        If topic and search are both given, only people matching both are returned
+        (the site filters by topic first, then by search).
+        If nobody matches, an empty list ([]) is returned, not 404.
+      parameters:
+        # Sitedeki /kisiler?konu=... filtresinin karşılığı (kisiler/page.tsx)
+        - name: topic
+          in: query
+          required: false
+          description: >
+            Clip topic. Case-insensitive using Turkish rules
+            ("EKİP", "Ekip", "ekip" are the same). Matches if any word in the topic
+            STARTS WITH this text ("eki" → ekip, "geç" → harekete geçmek;
+            "kip" → no match). Same method as the basliyor function in the site's
+            AramaKutusu.tsx. A person is kept if at least one of their clips has a
+            matching topic. If missing or empty, all people are returned.
+          schema:
+            type: string
+          example: harekete geçmek
+        # Sitedeki /kisiler?ara=... aramasının karşılığı (kisiler/page.tsx, aramaMetni)
+        - name: search
+          in: query
+          required: false
+          description: >
+            Search text. Leading and trailing spaces are removed; case-insensitive
+            using Turkish rules (I → ı, İ → i). A person is kept if any word in their
+            name, or in the topic or title of one of their clips, STARTS WITH this text
+            ("nev" → Nevzat Aydın, "ulu" → Hamdi Ulukaya; "zat" → no match).
+            Same method as the basliyor function in the site's AramaKutusu.tsx.
+            If missing or empty, all people are returned.
+          schema:
+            type: string
+          example: nev
+      responses:
+        "200":
+          description: List of people.
+          content:
+            application/json:
+              schema:
+                # Düz liste: people.json'un biçimi (PersonData[])
+                type: array
+                items:
+                  $ref: "#/components/schemas/PersonData"
+        "500":
+          description: Unexpected server error.
+
+  /people/{slug}:
+    get:
+      operationId: getPerson
+      summary: Tek kişi
+      description: >
+        Data of one person for the person page (/kisiler/[slug]):
+        biography, photo, links and clip notes (topic, quote).
+        The clips themselves (title, date, source) come from /clips;
+        the site joins them with the clip notes by the reel code.
+      parameters:
+        - $ref: "#/components/parameters/Slug"
+        # dosyadaki yolu
+      responses:
+        "200":
+          description: Person found.
+          content:
+            application/json:
+              schema:
+                # people.json'daki tek bir kişinin biçimi
+                $ref: "#/components/schemas/PersonData"
+        "400":
+          description: Invalid slug (contains characters that are not allowed).
+        "404":
+          # Site bugün bulamadığı kişide notFound() ile 404 sayfası gösteriyor.
+          description: No person with this slug.
+        "500":
+          description: Unexpected server error.
+
+  # Sitedeki arama kutusunun öneri listesi (AramaKutusu.tsx: eslesme, EN_FAZLA = 5)
+  /suggestions:
+    get:
+      operationId: listSuggestions
+      summary: Arama önerileri
+      description: >
+        Suggestion list shown while typing in the search box. Uses the same
+        matching rule as /people?search=, but returns short info instead of the
+        full person (no biography, photo, etc. → less data is sent).
+        People are returned in the same order as /people.
+      parameters:
+        - name: search
+          in: query
+          required: false
+          description: >
+            Search text. Same matching rule as /people?search=: spaces are trimmed,
+            case-insensitive using Turkish rules, and it matches if any word in the
+            name, a clip topic or a clip title STARTS WITH this text.
+            If missing or empty, there are no suggestions and an empty list ([]) is returned.
+          schema:
+            type: string
+          example: nev
+      responses:
+        "200":
+          description: The first 5 matching people. Empty list ([]) if nothing matches or the search is empty.
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 5
+                items:
+                  $ref: "#/components/schemas/PersonSuggestion"
+        "500":
+          description: Unexpected server error.
+
+  # const konular: string[] = [];
+  # for (const kisi of tumKisiler) {
+  #   for (const klip of kisi.clips) {
+  #     if (!konular.includes(klip.topic)) {
+  #       konular.push(klip.topic);
+  #     }
+  #   }
+  # }
+  /topics:
+    get:
+      operationId: listTopics
+      summary: Konu listesi
+      description: >
+        The topic values of all clips, each topic once.
+        The site (People page) currently derives topics from clips this way
+        and only uses their names.
+        The order is the same as on the site: people are visited in /people order,
+        each person's clips in their own order; each topic enters the list where it
+        is FIRST SEEN. Example: the first person is Nevzat Aydın (girişimcilik,
+        başarısızlık), so the list starts with "girişimcilik, başarısızlık, ...".
+        Not alphabetical. The order of the topic buttons comes from this list.
+      responses:
+        "200":
+          description: List of topics.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopicList"
+        "500":
+          description: Unexpected server error.
+# (//)
+  /clips:
+    get:
+      operationId: listClips
+      summary: Klip listesi
+      description: >
+        Exactly the same format as Şeyma's sample response
+        (klip-dergi/src/data/ornek-api.json). The site reads this address as
+        KLIP_API_URL in a single request without parameters, and checks each record
+        with the Zod schema in klip-semasi.ts.
+        Field names must stay Turkish; changing them breaks the site.
+      responses:
+        "200":
+          description: List of clips.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClipFeed"
+        "500":
+          description: Unexpected server error.
+
+components:
+# /kisiler/nevzat-aydin)
+  parameters:
+    Slug:
+      name: slug
+      in: path
+      required: true
+      description: The person's name in the URL.
+      schema:
+        type: string
+        # people.json'daki 12 slug'ın hepsi bu kalıba uyuyor.
+        pattern: "^[a-z0-9-]+$"
+      example: nevzat-aydin
+
+  schemas:
+    # export type Clip = {
+    #     platform: "instagram" | "youtube"; // string verseydim her platformu kabul ederdi. | = veya: ödevde sadece instagram ve youtube istendi
+    #     url: string;
+    #     title: string;
+    #     topic: string;
+    #     publishedAt: string;
+    #     cover: string;
+    #     source?: Source; // klibin kaynağı. ? = bulamadıklarımızda olmayabilir (4 klipte yok)
+    #     quote?: string; // klipten alıntı, kişinin kendi sözü. ? = bulamadıklarımızda olmayabilir (Aykut, Efe, Mark)
+    # };
+    Clip:
+      type: object
+      additionalProperties: false
+      required: [platform, url, title, topic, publishedAt, cover]
+      properties:
+        platform:
+          type: string
+          enum: [instagram, youtube]
+        url:
+          type: string
+        title:
+          type: string
+        topic:
+          type: string
+          example: girişimcilik
+        publishedAt:
+          type: string
+          example: "2026-09-24"
+        cover:
+          type: string
+          example: /kapaklar/Ddqm-BsAxNj.jpg
+        source:
+          $ref: "#/components/schemas/Source"
+        quote:
+          type: string
+
+    # export type Person = {
+    #     slug: string; // adresteki ad, ör. seyma-kelleci
+    #     name: string; // kişinin adı
+    #     bio: string; // biyografi, kendi cümlelerimle
+    #     dek: string; // kanca: başlığın altındaki tek cümlelik tanıtım
+    #     photo?: Photo; // fotoğraf (Wikipedia/Commons). ? = olmayabilir, 6 kişide yok
+    #     links: string[]; // kişinin sosyal medya adresleri, birden fazla olabildiği için liste
+    #     clips: Clip[]; // her klip 8 bilgi içerdiği için string değil, Clip kalıbını kullandık
+    #     updatedAt: string; // sayfanın son güncellenme tarihi, ör. "2026-11-14". ? yok: 12 kişide de var
+    #     editor: string; // biyografiyi hazırlayan editör. Bütün sayfaya ait → Person'da (klibe değil)
+    # };
+    Person:
+      type: object
+      additionalProperties: false
+      required: [slug, name, bio, dek, links, clips, updatedAt, editor]
+      properties:
+        slug:
+          type: string
+          example: nevzat-aydin
+        name:
+          type: string
+        bio:
+          type: string
+        dek:
+          type: string
+          description: One-sentence introduction shown under the title.
+        photo:
+          $ref: "#/components/schemas/Photo"
+        links:
+          type: array
+          # links: string[];
+          items:
+            type: string
+        # clips: Clip[];
+        clips:
+          type: array
+          items:
+            $ref: "#/components/schemas/Clip"
+        updatedAt:
+          type: string
+          example: "2026-11-14"
+        editor:
+          type: string
+
+    # // Klibe BİZİM eklediğimiz bilgi (people.json'da durur). Klibin kendisi (başlık, link, tarih, kaynak) API'den / örnek dosyadan gelir.
+    # // İkisi reel koduyla eşleşir.
+    # export type ClipNote = {
+    #     reel: string; // Instagram kodu, ör. "Ddqm-BsAxNj" (API'deki "reel" ile aynı)
+    #     topic: string; // konu: editör kararı
+    #     quote?: string; // klipten alıntı, kişinin kendi sözü. ? = her klipte yok
+    # };
+    ClipNote:
+      type: object
+      additionalProperties: false
+      required: [reel, topic]
+      properties:
+        reel:
+          type: string
+          description: Instagram code. Same as FeedClip.reel in /clips; the site joins the note with the clip by this code.
+          example: Ddqm-BsAxNj
+        topic:
+          type: string
+          description: Topic chosen by the editor.
+          example: girişimcilik
+        quote:
+          type: string
+          description: Quote from the clip, the person's own words.
+
+    # // people.json'daki bir kişinin hâli: clips yerine clipNotes (klip notları)
+    # // Omit<Person, "clips"> = Person'ın "clips" dışındaki bütün alanları
+    # export type PersonData = Omit<Person, "clips"> & { clipNotes: ClipNote[] };
+    # /people ve /people/{slug} bunu döner (people.json biçimi). Klipleri site birleştirir.
+    PersonData:
+      type: object
+      additionalProperties: false
+      required: [slug, name, bio, dek, links, clipNotes, updatedAt, editor]
+      properties:
+        slug:
+          type: string
+          example: nevzat-aydin
+        name:
+          type: string
+        bio:
+          type: string
+        dek:
+          type: string
+          description: One-sentence introduction shown under the title.
+        photo:
+          $ref: "#/components/schemas/Photo"
+        links:
+          type: array
+          items:
+            type: string
+        clipNotes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClipNote"
+        updatedAt:
+          type: string
+          example: "2026-11-14"
+        editor:
+          type: string
+
+    # // Fotoğrafın kimlik kartı (Wikipedia/Commons'tan)
+    # export type Photo = {
+    #     src: string; // görselin sitedeki adresi
+    #     width: number; // genişlik (piksel)
+    #     height: number; // yükseklik (piksel)
+    #     focus?: string; // yüz nerede: object-position değeri, ör. "50% 25%". ? = yoksa varsayılan (sayfada "50% 25%")
+    #     author: string; // fotoğrafçı
+    #     license: string; // lisans adı (CC BY 4.0 gibi)
+    #     licenseUrl?: string; // lisansın bağlantısı. ? = olmayabilir (kamu malında yok)
+    #     sourceUrl: string; // görselin Commons sayfası
+    # };
+    Photo:
+      type: object
+      additionalProperties: false
+      required: [src, width, height, author, license, sourceUrl]
+      properties:
+        src:
+          type: string
+          example: /fotograflar/hamdi-ulukaya.jpg
+        width:
+          type: integer
+        height:
+          type: integer
+        focus:
+          type: string
+          description: CSS object-position value. If missing, the site uses "50% 25%".
+          example: "50% 20%"
+        author:
+          type: string
+        license:
+          type: string
+          example: Public domain
+        licenseUrl:
+          type: string
+        sourceUrl:
+          type: string
+
+    # // Podcast programı (dizi gibi)
+    # export type Podcast = {
+    #     slug: string; // adresteki ad, ör. viral-girisimci
+    #     name: string; // programın adı
+    #     host: string; // sunucu
+    #     url: string; // programın ana linki
+    #     platforms: string[]; // YouTube, Spotify... birden fazla → liste
+    # };
+    # → Sözleşmede şeması yok: görevde istenmedi, site kullanmıyor.
+
+    # // Klibin geldiği bölüm
+    # export type Source = {
+    #     podcastSlug?: string; // hangi podcast. ? = bilinmiyorsa olmayabilir
+    #     episodeTitle: string; // bölümün adı
+    #     episodeUrl: string; // bölümün linki
+    #     timestamp?: string; // bölümün kaçıncı dakikası, ör. "12:34". ? = hoca vermedi, olmayabilir
+    # };
+    Source:
+      type: object
+      additionalProperties: false
+      required: [episodeTitle, episodeUrl]
+      properties:
+        podcastSlug:
+          type: string
+        episodeTitle:
+          type: string
+        episodeUrl:
+          type: string
+        timestamp:
+          type: string
+          example: "12:34"
+
+    # --- Klip ucu: klip-semasi.ts (Zod) ile birebir aynı kurallar ---
+    # Şema adları İngilizce, ama ALAN adları Türkçe kalmalı (site onları bekliyor).
+    # Zod karşılıkları: ClipFeed = CevapSemasi, FeedClip = KlipSemasi, FeedSource = KaynakSemasi
+    ClipFeed:
+      type: object
+      additionalProperties: false
+      required: [klipler]
+      properties:
+        klipler:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeedClip"
+
+    FeedClip:
+      type: object
+      additionalProperties: false
+      # kaynak yok: 4 klibin kaynağı bulunamadı (Zod'da .optional())
+      required: [reel, url, yayinTarihi, baslik, kisiler]
+      properties:
+        reel:
+          type: string
+          pattern: "^[\\w-]+$"
+          description: Instagram code. The site uses it to find the cover image (/kapaklar/{reel}.jpg) and the clip note.
+          example: Ddqm-BsAxNj
+        url:
+          type: string
+          format: uri
+          example: https://www.instagram.com/reel/Ddqm-BsAxNj/
+        yayinTarihi:
+          # Zod: z.union([z.iso.date(), z.iso.datetime()]) → ya sadece gün ya tam tarih-saat
+          anyOf:
+            - type: string
+              format: date
+            - type: string
+              format: date-time
+          example: "2026-09-24"
+        baslik:
+          type: string
+          minLength: 1
+        kaynak:
+          $ref: "#/components/schemas/FeedSource"
+        kisiler:
+          type: array
+          minItems: 1
+          description: NAMES of the people in the clip (not slugs). The site links a clip to a person by Person.name.
+          items:
+            type: string
+            minLength: 1
+          example: [Nevzat Aydın]
+
+    FeedSource:
+      type: object
+      additionalProperties: false
+      required: [videoBasligi, youtubeId]
+      properties:
+        videoBasligi:
+          type: string
+          minLength: 1
+        youtubeId:
+          type: string
+          pattern: "^[\\w-]{11}$"
+          example: sD09TB7M7u4
+
+    TopicList:
+      type: array
+      uniqueItems: true
+      items:
+        type: string
+      example: [girişimcilik, başarısızlık, risk almak]
+
+    # Sitedeki AramaKisisi tipinin İngilizce karşılığı:
+    # { ad, slug, konular, basliklar } → { name, slug, topics, titles }
+    PersonSuggestion:
+      type: object
+      additionalProperties: false
+      required: [name, slug, topics, titles]
+      properties:
+        name:
+          type: string
+          example: Nevzat Aydın
+        slug:
+          type: string
+          description: Person page to open when the suggestion is clicked (/kisiler/{slug}).
+          example: nevzat-aydin
+        topics:
+          type: array
+          uniqueItems: true
+          description: Topics of the person's clips, each topic once.
+          items:
+            type: string
+          example: [girişimcilik, başarısızlık]
+        titles:
+          type: array
+          description: Titles of the person's clips.
+          items:
+            type: string
+          example: [Girişimcilikte Obsesyonun Rolü, Vazgeçmek de Bir Başarıdır]

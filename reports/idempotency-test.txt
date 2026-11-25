@@ -1,0 +1,16 @@
+========== IDEMPOTENCY TEST ==========
+
+TABLE             FIRST RUN    SECOND RUN
+----------------------------------------
+people             12           12
+photos             5            5
+social_links       10           10
+episodes           10           10
+clips              21           21
+clip_people        21           21
+----------------------------------------
+TOTAL RECORDS     79           79
+NEW RECORDS       0
+
+RESULT: PASSED
+========================================
